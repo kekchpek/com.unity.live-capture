@@ -3,9 +3,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using UnityAuxiliaryTools.UnityExecutor;
 using UnityEngine;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
 
 namespace Unity.LiveCapture.Networking
 {
@@ -137,12 +134,6 @@ namespace Unity.LiveCapture.Networking
         protected NetworkBase(IUnityExecutor unityExecutor)
         {
             _unityExecutor = unityExecutor ?? throw new ArgumentNullException(nameof(unityExecutor));
-            // when using sockets, we need to be very careful to close them before trying to unload the domain
-            Application.quitting += () => Stop(false);
-#if UNITY_EDITOR
-            EditorApplication.quitting += () => Stop(false);
-            AssemblyReloadEvents.beforeAssemblyReload += () => Stop(false);
-#endif
         }
 
         /// <summary>
