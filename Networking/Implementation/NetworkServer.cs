@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
+using UnityAuxiliaryTools.UnityExecutor;
 using UnityEngine;
 
 namespace Unity.LiveCapture.Networking
@@ -14,7 +15,7 @@ namespace Unity.LiveCapture.Networking
         class AcceptState
         {
             public Socket Listener;
-            public NetworkSocket Udp;
+            public INetworkSocket Udp;
         }
 
         // The size of the tcp backlog, which limits the number of connections which can be in queue
@@ -24,7 +25,7 @@ namespace Unity.LiveCapture.Networking
         const int k_MaxPendingConnections = 20;
 
         readonly List<Socket> m_Listeners = new List<Socket>();
-        readonly List<NetworkSocket> m_UdpSockets = new List<NetworkSocket>();
+        readonly List<INetworkSocket> m_UdpSockets = new List<INetworkSocket>();
         readonly List<IPEndPoint> m_EndPoints = new List<IPEndPoint>();
         int m_Port;
 
@@ -43,6 +44,11 @@ namespace Unity.LiveCapture.Networking
         /// The list will be empty if the server is not running.
         /// </remarks>
         public IReadOnlyList<IPEndPoint> EndPoints => m_EndPoints;
+
+        public NetworkServer(IUnityExecutor unityExecutor) : base(unityExecutor)
+        {
+            
+        }
 
         /// <summary>
         /// Starts up the server.
@@ -88,9 +94,10 @@ namespace Unity.LiveCapture.Networking
                 }
 
                 m_EndPoints.Add(localEndPoint);
+                Debug.Log(localEndPoint);
             }
 
-            m_IsRunning = true;
+            MIsRunning = true;
             RaiseStartedEvent();
             return true;
         }
@@ -98,6 +105,7 @@ namespace Unity.LiveCapture.Networking
         /// <inheritdoc/>
         public override void Stop(bool graceful = true)
         {
+            Debug.Log("Stop");
             m_EndPoints.Clear();
 
             // stop accepting new connections before closing existing connections
@@ -160,7 +168,7 @@ namespace Unity.LiveCapture.Networking
                 m_Listeners.Add(socket);
 
                 state.Listener = socket;
-
+                
                 socket.Bind(localEndPoint);
                 socket.Listen(k_MaxPendingConnections);
                 socket.BeginAccept(OnAccept, state);
@@ -176,16 +184,26 @@ namespace Unity.LiveCapture.Networking
 
         void OnAccept(IAsyncResult result)
         {
+            Debug.Log("OnAccept");
             var state = result.AsyncState as AcceptState;
 
             try
             {
-                var socket = state.Listener.EndAccept(result);
+                var socket = state.Listener.EndAccept(result); 
 
-                var tcp = default(NetworkSocket);
+                var tcp = default(INetworkSocket);
                 tcp = new NetworkSocket(this, socket, false, (remote) =>
                 {
-                    new Connection(this, tcp, state.Udp, remote);
+                    var connection = new Connection(tcp, state.Udp, remote);
+                    connection.MessageReceived += HandleMessage;
+                    RegisterConnection(connection);
+                    void Deregister(DisconnectStatus status)
+                    {
+                        DeregisterConnection(connection, status);
+                        connection.Closed -= Deregister;
+                        connection.MessageReceived -= HandleMessage;
+                    }
+                    connection.Closed += Deregister;
                 });
                 DoHandshake(tcp, state.Udp);
             }
@@ -193,6 +211,7 @@ namespace Unity.LiveCapture.Networking
             {
                 // This callback is invoked while the listener socket is closing.
                 // The call to EndAccept will throw this exception when that occurs.
+                Debug.LogError($"Disposed!!!");
                 return;
             }
             catch (Exception e)

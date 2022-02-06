@@ -365,7 +365,7 @@ namespace Unity.LiveCapture.CompanionApp
         /// </summary>
         internal void SendProtocol()
         {
-            var message = Message.Get(m_Remote, ChannelType.ReliableOrdered, 8192);
+            var message = Message.Get(m_Remote.ID, ChannelType.ReliableOrdered, 8192);
 
             m_Protocol.CreateInverse().Serialize(message.Data);
 

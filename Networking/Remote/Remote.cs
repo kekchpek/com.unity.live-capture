@@ -6,7 +6,7 @@ namespace Unity.LiveCapture.Networking
     /// <summary>
     /// A handle to a remote server or client.
     /// </summary>
-    class Remote : IEquatable<Remote>
+    internal class Remote : IEquatable<Remote>
     {
         /// <summary>
         /// The handle that represents all remotes.

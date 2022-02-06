@@ -5,6 +5,8 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -51,14 +53,16 @@ namespace Unity.LiveCapture.Networking.Discovery
         /// <summary>
         /// The size of the message buffers in bytes. This limits the size of the messages used by the discovery protocol.
         /// </summary>
-        const int k_BufferSize = 1024;
+        const int BufferSize = 1024;
 
-        static readonly ConcurrentBag<SocketAsyncEventArgs> s_SendArgsPool = new ConcurrentBag<SocketAsyncEventArgs>();
+        private static readonly TimeSpan TickInterval = TimeSpan.FromMilliseconds(100);
+        private static readonly ConcurrentBag<SocketAsyncEventArgs> SendArgsPool = new ConcurrentBag<SocketAsyncEventArgs>();
 
-        Socket m_RecieveSocket;
-        readonly List<Socket> m_SendSockets = new List<Socket>();
-        EndPoint m_BroadcastEndPoint;
-        volatile bool m_RecreateSendSockets;
+        private Socket _receiveSocket;
+        private readonly List<Socket> _sendSockets = new List<Socket>();
+        private EndPoint _broadcastEndPoint;
+        private volatile bool _recreateSendSockets;
+        private readonly CancellationTokenSource _tickingCancellationToken = new CancellationTokenSource();
 
         /// <summary>
         /// Is discovery started.
@@ -98,7 +102,7 @@ namespace Unity.LiveCapture.Networking.Discovery
             }
 
             // create a socket used to receive broadcasts
-            if (!TryCreateSocket(new IPEndPoint(IPAddress.Any, Port), false, out m_RecieveSocket))
+            if (!TryCreateSocket(new IPEndPoint(IPAddress.Any, Port), false, out _receiveSocket))
             {
                 Debug.LogError($"{GetType().Name}: Failed to create receive socket, stopping server discovery!");
                 Stop();
@@ -106,12 +110,12 @@ namespace Unity.LiveCapture.Networking.Discovery
             }
 
             var receiveArgs = new SocketAsyncEventArgs();
-            receiveArgs.SetBuffer(new byte[k_BufferSize], 0, k_BufferSize);
+            receiveArgs.SetBuffer(new byte[BufferSize], 0, BufferSize);
             receiveArgs.Completed += ReceiveComplete;
-            receiveArgs.UserToken = m_RecieveSocket;
+            receiveArgs.UserToken = _receiveSocket;
             BeginReceive(receiveArgs);
 
-            m_BroadcastEndPoint = new IPEndPoint(IPAddress.Broadcast, Port);
+            _broadcastEndPoint = new IPEndPoint(IPAddress.Broadcast, Port);
             CreateSendSockets();
 
             // when using sockets, we need to be very careful to close them before trying to unload the domain
@@ -122,6 +126,7 @@ namespace Unity.LiveCapture.Networking.Discovery
             Application.quitting += Stop;
 #endif
 
+            StartTicking(_tickingCancellationToken);
             IsRunning = true;
             return true;
         }
@@ -140,36 +145,39 @@ namespace Unity.LiveCapture.Networking.Discovery
 
             OnStop();
 
-            if (m_RecieveSocket != null)
+            if (_receiveSocket != null)
             {
-                NetworkUtilities.DisposeSocket(m_RecieveSocket);
-                m_RecieveSocket = null;
+                NetworkUtilities.DisposeSocket(_receiveSocket);
+                _receiveSocket = null;
             }
 
-            foreach (var socket in m_SendSockets)
+            foreach (var socket in _sendSockets)
                 NetworkUtilities.DisposeSocket(socket);
-            m_SendSockets.Clear();
+            _sendSockets.Clear();
 
+            _tickingCancellationToken.Cancel();
             IsRunning = false;
         }
 
         /// <summary>
         /// Called to update the server discovery and invoke any events.
         /// </summary>
-        public void Update()
+        private async void StartTicking(CancellationTokenSource cancellationToken)
         {
-            if (!IsRunning)
-                return;
 
-            var now = DateTime.Now;
-
-            // Recreate the sockets used to send messages only on the main thread
-            if (m_RecreateSendSockets)
+            while (!cancellationToken.IsCancellationRequested)
             {
-                CreateSendSockets();
-            }
+                var now = DateTime.Now;
 
-            OnUpdate(now);
+                // Recreate the sockets used to send messages only on the main thread
+                if (_recreateSendSockets)
+                {
+                    CreateSendSockets();
+                }
+
+                Tick(now);
+                await Task.Delay(TickInterval, cancellationToken.Token);
+            }
         }
 
         /// <summary>
@@ -203,16 +211,16 @@ namespace Unity.LiveCapture.Networking.Discovery
         /// <param name="synchronous">Block the calling thread until the message is sent.</param>
         protected void Broadcast(byte[] packet, bool synchronous)
         {
-            foreach (var socket in m_SendSockets)
+            foreach (var socket in _sendSockets)
                 Broadcast(socket, packet, synchronous);
         }
 
         void CreateSendSockets()
         {
             // clear any existing send sockets
-            foreach (var socket in m_SendSockets)
+            foreach (var socket in _sendSockets)
                 NetworkUtilities.DisposeSocket(socket);
-            m_SendSockets.Clear();
+            _sendSockets.Clear();
 
             // Create a UDP socket used to send broadcasts on each relevant network interface. The port is irrelevant
             // so we let the OS pick a free one. If a network interface is currently initializing, the socket will
@@ -221,10 +229,10 @@ namespace Unity.LiveCapture.Networking.Discovery
             foreach (var address in GetSendAddresses().Reverse())
             {
                 if (TryCreateSocket(new IPEndPoint(address, 0), true, out var socket))
-                    m_SendSockets.Add(socket);
+                    _sendSockets.Add(socket);
             }
 
-            m_RecreateSendSockets = false;
+            _recreateSendSockets = false;
         }
 
         void Broadcast(Socket socket, byte[] packet, bool synchronous)
@@ -233,18 +241,18 @@ namespace Unity.LiveCapture.Networking.Discovery
             {
                 if (synchronous)
                 {
-                    socket.SendTo(packet, m_BroadcastEndPoint);
+                    socket.SendTo(packet, _broadcastEndPoint);
                 }
                 else
                 {
-                    if (!s_SendArgsPool.TryTake(out var args))
+                    if (!SendArgsPool.TryTake(out var args))
                     {
                         args = new SocketAsyncEventArgs();
                         args.Completed += SendComplete;
                     }
 
                     args.SetBuffer(packet, 0, packet.Length);
-                    args.RemoteEndPoint = m_BroadcastEndPoint;
+                    args.RemoteEndPoint = _broadcastEndPoint;
 
                     if (!socket.SendToAsync(args))
                         SendComplete(socket, args);
@@ -269,6 +277,7 @@ namespace Unity.LiveCapture.Networking.Discovery
                     // response was received. We don't care if a UDP packet was not received, so don't
                     // close the connection in that case.
                     case SocketError.ConnectionReset:
+                        Debug.LogError("Connection reset");
                         break;
 
                     // If we can't broadcast on this network interface, the available networks may have changed.
@@ -277,7 +286,8 @@ namespace Unity.LiveCapture.Networking.Discovery
                     case SocketError.HostUnreachable:
                     case SocketError.NetworkUnreachable:
                     case SocketError.NetworkDown:
-                        m_RecreateSendSockets = true;
+                        Debug.LogError("Unreachable error");
+                        _recreateSendSockets = true;
                         return;
 
                     // When the socket is disposed, suppress the error since it is expected that
@@ -287,6 +297,7 @@ namespace Unity.LiveCapture.Networking.Discovery
                     case SocketError.OperationAborted:
                     case SocketError.ConnectionAborted:
                     case SocketError.Disconnecting:
+                        Debug.LogError("Abort error");
                         return;
 
                     default:
@@ -299,7 +310,7 @@ namespace Unity.LiveCapture.Networking.Discovery
             }
             finally
             {
-                s_SendArgsPool.Add(args);
+                SendArgsPool.Add(args);
             }
         }
 
@@ -387,14 +398,14 @@ namespace Unity.LiveCapture.Networking.Discovery
                 socket.Bind(endPoint);
 
                 // ensure we can fit any message we want to send or receive with the socket
-                socket.SendBufferSize = k_BufferSize;
-                socket.ReceiveBufferSize = k_BufferSize;
+                socket.SendBufferSize = BufferSize;
+                socket.ReceiveBufferSize = BufferSize;
 
                 // We need to check that broadcasting is supported on this interface. This can be done by
                 // trying to broadcast and checking if an error is thrown.
                 if (isSender)
                 {
-                    socket.SendTo(new byte[0] {}, m_BroadcastEndPoint);
+                    socket.SendTo(new byte[0] {}, _broadcastEndPoint);
                 }
 
                 return true;
@@ -427,7 +438,7 @@ namespace Unity.LiveCapture.Networking.Discovery
         /// Called when the server discovery should update.
         /// </summary>
         /// <param name="now">The current time.</param>
-        protected virtual void OnUpdate(DateTime now)
+        protected virtual void Tick(DateTime now)
         {
         }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Net;
+using UnityEngine;
 
 namespace Unity.LiveCapture.Networking.Discovery
 {
@@ -84,6 +85,7 @@ namespace Unity.LiveCapture.Networking.Discovery
         /// <inheritdoc />
         protected override void OnStop()
         {
+            Debug.Log("Discovery stopped");
             // Send a message informing clients the server is no longer available
             // so they don't need to wait for the timeout to realize it is lost.
             var packet = CreatePacket(PacketType.Shutdown, SizeOfCache<ShutdownData>.Size, out var offset);
@@ -92,7 +94,7 @@ namespace Unity.LiveCapture.Networking.Discovery
         }
 
         /// <inheritdoc />
-        protected override void OnUpdate(DateTime now)
+        protected override void Tick(DateTime now)
         {
             if (now - m_LastSendTime > k_SendPeriod)
             {

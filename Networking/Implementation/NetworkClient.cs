@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using UnityAuxiliaryTools.UnityExecutor;
 using UnityEngine;
 
 namespace Unity.LiveCapture.Networking
@@ -10,38 +11,38 @@ namespace Unity.LiveCapture.Networking
     /// <summary>
     /// A client that can connect to a <see cref="NetworkServer"/> instance.
     /// </summary>
-    class NetworkClient : NetworkBase
+    internal class NetworkClient : NetworkBase
     {
         /// <summary>
         /// Used to keep track of the client state for connection attempts. This is used
         /// as opposed to having these fields in <see cref="NetworkClient"/> so that the
         /// old connection tasks that are being cancelled cannot modify the current state.
         /// </summary>
-        class ConnectState
+        private class ConnectState
         {
             public IPEndPoint RemoteEndPoint;
             public IPEndPoint LocalEndPoint;
-            public NetworkSocket Udp;
-            public NetworkSocket Tcp;
+            public INetworkSocket Udp;
+            public INetworkSocket Tcp;
             public CancellationTokenSource CancellationToken;
         }
 
-        ConnectState m_ConnectState;
+        private ConnectState _connectState;
 
         /// <summary>
         /// The IP and port the client is using to communicate, or null if the client is not running.
         /// </summary>
-        public IPEndPoint LocalEndPoint => m_IsRunning ? m_ConnectState.LocalEndPoint : null;
+        public IPEndPoint LocalEndPoint => MIsRunning ? _connectState.LocalEndPoint : null;
 
         /// <summary>
         /// The IP and port of the server the client is connecting to, or null if the client is not running.
         /// </summary>
-        public IPEndPoint ServerEndPoint => m_IsRunning ? m_ConnectState.RemoteEndPoint : null;
+        public IPEndPoint ServerEndPoint => MIsRunning ? _connectState.RemoteEndPoint : null;
 
         /// <summary>
         /// Is this client currently trying to connect to a server.
         /// </summary>
-        public bool IsConnecting => m_IsRunning && !m_ConnectState.CancellationToken.IsCancellationRequested;
+        public bool IsConnecting => MIsRunning && !_connectState.CancellationToken.IsCancellationRequested;
 
         /// <summary>
         /// How long in milliseconds to wait between connection attempts.
@@ -52,7 +53,7 @@ namespace Unity.LiveCapture.Networking
         /// <summary>
         /// Creates a new <see cref="NetworkClient"/> instance.
         /// </summary>
-        public NetworkClient()
+        public NetworkClient(IUnityExecutor unityExecutor) : base(unityExecutor)
         {
             RemoteDisconnected += OnDisconnect;
         }
@@ -111,7 +112,7 @@ namespace Unity.LiveCapture.Networking
             if (!StartInternal(remoteEndPoint, localPort))
                 return false;
 
-            m_IsRunning = true;
+            MIsRunning = true;
             RaiseStartedEvent();
             return true;
         }
@@ -119,40 +120,40 @@ namespace Unity.LiveCapture.Networking
         /// <inheritdoc/>
         public override void Stop(bool graceful = true)
         {
-            m_ConnectState?.CancellationToken?.Cancel();
+            _connectState?.CancellationToken?.Cancel();
 
             base.Stop(graceful);
 
-            if (m_ConnectState != null)
+            if (_connectState != null)
             {
-                m_ConnectState.Udp?.Dispose();
-                m_ConnectState.Tcp?.Dispose();
-                m_ConnectState = null;
+                _connectState.Udp?.Dispose();
+                _connectState.Tcp?.Dispose();
+                _connectState = null;
             }
         }
 
-        bool StartInternal(IPEndPoint remoteEndPoint, int localPort)
+        private bool StartInternal(IPEndPoint remoteEndPoint, int localPort)
         {
             // We create a new instance so that if the client is stopped we can safely modify the state
             // without worrying about it being modified by the EndConnect callback.
-            m_ConnectState = new ConnectState
+            _connectState = new ConnectState
             {
                 RemoteEndPoint = remoteEndPoint,
                 LocalEndPoint = new IPEndPoint(NetworkUtilities.GetRoutingInterface(remoteEndPoint), localPort),
             };
 
-            if (!CreateUdpSocket(m_ConnectState))
+            if (!CreateUdpSocket(_connectState))
             {
                 Stop();
                 return false;
             }
 
-            ConnectAsync(m_ConnectState);
+            ConnectAsync(_connectState);
 
             return true;
         }
 
-        bool CreateUdpSocket(ConnectState state)
+        private bool CreateUdpSocket(ConnectState state)
         {
             try
             {
@@ -174,7 +175,7 @@ namespace Unity.LiveCapture.Networking
             return true;
         }
 
-        bool CreateTcpSocket(ConnectState state)
+        private bool CreateTcpSocket(ConnectState state)
         {
             try
             {
@@ -183,9 +184,17 @@ namespace Unity.LiveCapture.Networking
                 {
                     state.CancellationToken.Cancel();
 
+                    var connection = new Connection(state.Tcp, state.Udp, remote);
+                    connection.MessageReceived += HandleMessage;
                     DoHandshake(state.Tcp, state.Udp);
-
-                    new Connection(this, state.Tcp, state.Udp, remote);
+                    RegisterConnection(connection);
+                    void Deregister(DisconnectStatus status)
+                    {
+                        DeregisterConnection(connection, status);
+                        connection.Closed -= Deregister;
+                        connection.MessageReceived -= HandleMessage;
+                    }
+                    connection.Closed += Deregister;
                 });
 
                 socket.Bind(state.LocalEndPoint);
@@ -199,7 +208,7 @@ namespace Unity.LiveCapture.Networking
             return true;
         }
 
-        async void ConnectAsync(ConnectState state)
+        private async void ConnectAsync(ConnectState state)
         {
             state.CancellationToken = new CancellationTokenSource();
 
@@ -227,7 +236,7 @@ namespace Unity.LiveCapture.Networking
             }
         }
 
-        void EndConnect(IAsyncResult result)
+        private void EndConnect(IAsyncResult result)
         {
             var state = result.AsyncState as ConnectState;
 
@@ -258,7 +267,7 @@ namespace Unity.LiveCapture.Networking
             }
         }
 
-        void OnDisconnect(Remote remote, DisconnectStatus status)
+        private void OnDisconnect(Remote remote, DisconnectStatus status)
         {
             switch (status)
             {
@@ -267,7 +276,7 @@ namespace Unity.LiveCapture.Networking
                 default:
                     // when there is a non-graceful disconnect we should try to reconnect to the
                     // server to avoid needing to stop and start the client.
-                    StartInternal(m_ConnectState.RemoteEndPoint, m_ConnectState.LocalEndPoint.Port);
+                    StartInternal(_connectState.RemoteEndPoint, _connectState.LocalEndPoint.Port);
                     break;
             }
         }

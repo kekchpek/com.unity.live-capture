@@ -1,6 +1,9 @@
 {
     "name": "Unity.LiveCapture.Networking",
-    "references": [],
+    "rootNamespace": "",
+    "references": [
+        "GUID:6b6cb9f5aeed41f49ae532d9d2cfc45b"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": true,

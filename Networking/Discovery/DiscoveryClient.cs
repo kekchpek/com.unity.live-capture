@@ -112,7 +112,7 @@ namespace Unity.LiveCapture.Networking.Discovery
         }
 
         /// <inheritdoc />
-        protected override void OnUpdate(DateTime now)
+        protected override void Tick(DateTime now)
         {
             while (m_UpdatedServers.TryDequeue(out var discovery))
             {

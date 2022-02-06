@@ -9,21 +9,7 @@ namespace Unity.LiveCapture.Editor
     {
         static CallbackInitializer()
         {
-            EditorApplication.update += OnUpdate;
             Callbacks.SeekOccurred += SeekOccurred;
-        }
-
-        static void OnUpdate()
-        {
-            UpdateServers();
-        }
-
-        static void UpdateServers()
-        {
-            foreach (var server in ServerManager.Instance.Servers)
-            {
-                server.OnUpdate();
-            }
         }
 
         static void SeekOccurred(ISlate slate, PlayableDirector director)

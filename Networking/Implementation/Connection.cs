@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -13,27 +12,29 @@ namespace Unity.LiveCapture.Networking
     /// The connection health is tested using a heartbeat, sending and receiving UDP packets periodically from the
     /// remote to ensure it is still reachable.
     /// </remarks>
-    class Connection
+    internal class Connection
     {
         /// <summary>
         /// The threshold for missed heartbeat messages before the connection is assumed to be dead.
         /// </summary>
-        const int k_HeartbeatDisconnectCount = 8;
+        private const int HeartbeatDisconnectCount = 8;
 
         /// <summary>
         /// The duration in seconds between heartbeat messages.
         /// </summary>
-        static readonly TimeSpan k_HeartbeatPeriod = TimeSpan.FromSeconds(1.0);
+        private static readonly TimeSpan HeartbeatPeriod = TimeSpan.FromSeconds(1.0);
+        private static readonly TimeSpan CheckHeartbeatPeriod = TimeSpan.FromSeconds(0.1);
 
-        readonly NetworkBase m_Network;
-        readonly NetworkSocket m_Tcp;
-        readonly NetworkSocket m_Udp;
+        public event Action<Message> MessageReceived;
+        public event Action<DisconnectStatus> Closed;
+        
+        private readonly INetworkSocket _tcpSocket;
+        private readonly INetworkSocket _udpSocket;
+        
+        private readonly CancellationTokenSource _heartbeatCancellationToken = new CancellationTokenSource();
 
-        readonly CancellationTokenSource m_HeartbeatCancellationToken = new CancellationTokenSource();
-        readonly Queue<Packet> m_TempReceiveQueue = new Queue<Packet>();
-
-        DateTime m_LastHeartbeat;
-        bool m_Disposed;
+        private DateTime? _lastHeartbeatTime;
+        private bool _disposed;
 
         /// <summary>
         /// The remote at the other end of the connection.
@@ -43,23 +44,21 @@ namespace Unity.LiveCapture.Networking
         /// <summary>
         /// Creates a new <see cref="Connection"/> instance.
         /// </summary>
-        /// <param name="network">The networking instance on the local side of the connection.</param>
         /// <param name="tcp">The local tcp socket connected to the remote.</param>
         /// <param name="udp">The local udp socket used to communicate with the remote.</param>
         /// <param name="remote">The remote at the other end of the connection.</param>
-        public Connection(NetworkBase network, NetworkSocket tcp, NetworkSocket udp, Remote remote)
+        public Connection(INetworkSocket tcp, INetworkSocket udp, Remote remote)
         {
-            m_Network = network ?? throw new ArgumentNullException(nameof(tcp));
-            m_Tcp = tcp ?? throw new ArgumentNullException(nameof(tcp));
-            m_Udp = udp ?? throw new ArgumentNullException(nameof(udp));
+            _tcpSocket = tcp ?? throw new ArgumentNullException(nameof(tcp));
+            _udpSocket = udp ?? throw new ArgumentNullException(nameof(udp));
             Remote = remote ?? throw new ArgumentNullException(nameof(remote));
 
-            m_Tcp.RegisterConnection(this);
-            m_Udp.RegisterConnection(this);
+            _tcpSocket.PacketReceived += OnPackageReceived;
+            _udpSocket.PacketReceived += OnPackageReceived;
 
-            m_Network.RegisterConnection(this);
-
-            DoHeartbeat();
+            StartDoingHeartbeat(_heartbeatCancellationToken);
+            
+            StartCheckingHeartbeat(_heartbeatCancellationToken);
         }
 
         /// <summary>
@@ -68,28 +67,28 @@ namespace Unity.LiveCapture.Networking
         /// <param name="status">How the connection was terminated.</param>
         public void Close(DisconnectStatus status)
         {
-            if (m_Disposed)
+            if (_disposed)
                 return;
 
-            m_Disposed = true;
+            _disposed = true;
 
-            m_HeartbeatCancellationToken.Cancel();
+            _heartbeatCancellationToken.Cancel();
 
-            m_Network.DeregisterConnection(this, status);
+            Closed?.Invoke(status);
 
             // Remote the connection from sockets that are shared, and
             // dispose sockets that are exclusive to this connection.
-            if (!m_Udp.IsDisposed)
+            if (!_udpSocket.IsDisposed)
             {
-                m_Udp.DeregisterConnection(this);
+                _udpSocket.PacketReceived -= OnPackageReceived;
 
-                if (m_Udp.RemoteEndPoint != null)
-                    m_Udp.Dispose();
+                if (_udpSocket.RemoteEndPoint != null)
+                    _udpSocket.Dispose();
             }
-            if (!m_Tcp.IsDisposed)
+            if (!_tcpSocket.IsDisposed)
             {
-                m_Tcp.DeregisterConnection(this);
-                m_Tcp.Dispose();
+                _udpSocket.PacketReceived -= OnPackageReceived;
+                _tcpSocket.Dispose();
             }
         }
 
@@ -100,16 +99,15 @@ namespace Unity.LiveCapture.Networking
         /// <param name="synchronous">If true the caller is blocked until the message is received by the remote.</param>
         public void Send(Packet packet, bool synchronous)
         {
-            if (m_Disposed)
+            if (_disposed)
                 throw new ObjectDisposedException(nameof(Connection));
-
             switch (packet.Message.ChannelType)
             {
                 case ChannelType.ReliableOrdered:
-                    m_Tcp.Send(packet, synchronous);
+                    _tcpSocket.Send(packet, synchronous);
                     break;
                 case ChannelType.UnreliableUnordered:
-                    m_Udp.Send(packet, synchronous);
+                    _udpSocket.Send(packet, synchronous);
                     break;
                 default:
                     throw new ArgumentException($"Message channel {packet.Message.ChannelType} is not supported.");
@@ -117,87 +115,92 @@ namespace Unity.LiveCapture.Networking
         }
 
         /// <summary>
-        /// Receives messages from the sockets and checks the connection health.
+        /// Checks the connection health.
         /// </summary>
-        public void Update()
+        private async void StartCheckingHeartbeat(CancellationTokenSource cancellationToken)
         {
-            if (m_Disposed)
-                throw new ObjectDisposedException(nameof(Connection));
-
-            ReceiveInternal(m_Udp);
-            ReceiveInternal(m_Tcp);
-
             // Check if any of the last few heartbeat messages were received. If we have not received
             // any for long enough, we can assume the connection is lost. Losing multiple packets sent
             // on a local network seconds apart is extremely unlikely on a modern network.
 
-            // An issue was encountered on iOS only where m_LastHeartbeat was not being correctly set
-            // when assigned the value DateTime.Now in the constructor, instead being set to the default
-            // DateTime value. To fix the issue we initialize the value here. It could be related to the
-            // fact the constructor is called from the thread pool. This only occurs for the first
-            // connection however.
-            if (m_LastHeartbeat == DateTime.MinValue)
-                m_LastHeartbeat = DateTime.Now;
-
-            var timeSinceLastBeat = (DateTime.Now - m_LastHeartbeat).TotalSeconds;
-            var disconnectDuration = k_HeartbeatDisconnectCount * k_HeartbeatPeriod.TotalSeconds;
-
-            if (timeSinceLastBeat > disconnectDuration)
-                Close(DisconnectStatus.Timeout);
-        }
-
-        void ReceiveInternal(NetworkSocket socket)
-        {
-            m_TempReceiveQueue.Clear();
-            socket.Receive(this, m_TempReceiveQueue);
-
-            while (m_TempReceiveQueue.Count > 0)
+            while (true)
             {
-                var packet = m_TempReceiveQueue.Dequeue();
-                var message = packet.Message;
+                // An issue was encountered on iOS only where m_LastHeartbeat was not being correctly set
+                // when assigned the value DateTime.Now in the constructor, instead being set to the default
+                // DateTime value. To fix the issue we initialize the value here. It could be related to the
+                // fact the constructor is called from the thread pool. This only occurs for the first
+                // connection however.
+                _lastHeartbeatTime ??= DateTime.Now;
 
-                switch (packet.PacketType)
-                {
-                    case Packet.Type.Generic:
-                    {
-                        m_Network.ReceiveMessage(message);
-                        break;
-                    }
-                    case Packet.Type.Heartbeat:
-                    {
-                        m_LastHeartbeat = DateTime.Now;
-                        message.Dispose();
-                        break;
-                    }
-                    case Packet.Type.Disconnect:
-                    {
-                        Close(DisconnectStatus.Graceful);
-                        message.Dispose();
-                        return;
-                    }
-                    default:
-                        Debug.LogError($"A packet of type {packet.PacketType} ({(int)packet.PacketType}) was received but that type is never used!");
-                        message.Dispose();
-                        break;
-                }
-            }
-        }
-
-        async void DoHeartbeat()
-        {
-            while (!m_HeartbeatCancellationToken.IsCancellationRequested)
-            {
                 try
                 {
-                    await Task.Delay(k_HeartbeatPeriod, m_HeartbeatCancellationToken.Token);
+                    await Task.Delay(CheckHeartbeatPeriod, cancellationToken.Token);
                 }
                 catch (TaskCanceledException)
                 {
                 }
 
-                if (!m_HeartbeatCancellationToken.IsCancellationRequested)
+                if (cancellationToken.IsCancellationRequested)
+                    return;
+
+                var timeSinceLastBeat = (DateTime.Now - _lastHeartbeatTime.Value).TotalSeconds;
+                var disconnectDuration = HeartbeatDisconnectCount * HeartbeatPeriod.TotalSeconds;
+
+                if (timeSinceLastBeat > disconnectDuration)
+                    Close(DisconnectStatus.Timeout);
+            }
+        }
+
+        private void OnPackageReceived(Packet packet)
+        {
+            var message = packet.Message;
+
+            switch (packet.PacketType)
+            {
+                case Packet.Type.Generic:
                 {
-                    var message = Message.Get(Remote, ChannelType.UnreliableUnordered);
+                    MessageReceived?.Invoke(message);
+                    break;
+                }
+                case Packet.Type.Heartbeat:
+                {
+                    _lastHeartbeatTime = DateTime.Now;
+                    message.Dispose();
+                    break;
+                }
+                case Packet.Type.Disconnect:
+                {
+                    Close(DisconnectStatus.Graceful);
+                    message.Dispose();
+                    return;
+                }
+                case Packet.Type.Invalid:
+                    Debug.LogWarning("Invalid package received");
+                    break;
+                case Packet.Type.Initialization:
+                    break;
+                default:
+                    Debug.LogError($"A packet of type {packet.PacketType} ({(int)packet.PacketType}) was received but that type is never used!");
+                    message.Dispose();
+                    break;
+            }
+        }
+
+        private async void StartDoingHeartbeat(CancellationTokenSource cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(HeartbeatPeriod, cancellationToken.Token);
+                }
+                catch (TaskCanceledException)
+                {
+                }
+
+                if (!_heartbeatCancellationToken.IsCancellationRequested)
+                {
+                    var message = Message.Get(Remote.ID, ChannelType.UnreliableUnordered);
                     var packet = new Packet(message, Packet.Type.Heartbeat);
 
                     Send(packet, false);

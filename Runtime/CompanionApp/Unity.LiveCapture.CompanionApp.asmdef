@@ -4,7 +4,8 @@
     "references": [
         "Unity.LiveCapture",
         "Unity.LiveCapture.Networking",
-        "Unity.Timeline"
+        "Unity.Timeline",
+        "UnityAuxiliarty"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

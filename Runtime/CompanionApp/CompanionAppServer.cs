@@ -3,11 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using SocialDemo.Code.Auxiliary.UnityExecutor;
 using Unity.LiveCapture.Networking;
 using Unity.LiveCapture.Networking.Discovery;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
 using UnityEngine;
 
 namespace Unity.LiveCapture.CompanionApp
@@ -16,9 +14,8 @@ namespace Unity.LiveCapture.CompanionApp
     /// The server used to communicate with the companion apps.
     /// </summary>
     [CreateServerMenuItem("Companion App Server")]
-    class CompanionAppServer : Server
+    public class CompanionAppServer
     {
-        const int k_DefaultPort = 9000;
 
         /// <summary>
         /// The server executes this event when a client has connected.
@@ -30,15 +27,15 @@ namespace Unity.LiveCapture.CompanionApp
         /// </summary>
         public static event Action<ICompanionAppClient> ClientDisconnected = delegate {};
 
-        struct ConnectHandler
+        private struct ConnectHandler
         {
             public string Name;
             public DateTime Time;
             public Func<ICompanionAppClient, bool> Handler;
         }
 
-        static readonly Dictionary<string, Type> s_TypeToClientType = new Dictionary<string, Type>();
-        static readonly List<ConnectHandler> s_ClientConnectHandlers = new List<ConnectHandler>();
+        private static readonly Dictionary<string, Type> TypeToClientType = new Dictionary<string, Type>();
+        private static readonly List<ConnectHandler> ClientConnectHandlers = new List<ConnectHandler>();
 
         /// <summary>
         /// Adds a callback used to take ownership of a client that has connected.
@@ -55,7 +52,7 @@ namespace Unity.LiveCapture.CompanionApp
 
             DeregisterClientConnectHandler(handler);
 
-            s_ClientConnectHandlers.Add(new ConnectHandler
+            ClientConnectHandlers.Add(new ConnectHandler
             {
                 Name = name,
                 Time = time,
@@ -73,11 +70,11 @@ namespace Unity.LiveCapture.CompanionApp
             if (handler == null)
                 throw new ArgumentNullException(nameof(handler));
 
-            for (var i = 0; i < s_ClientConnectHandlers.Count; i++)
+            for (var i = 0; i < ClientConnectHandlers.Count; i++)
             {
-                if (s_ClientConnectHandlers[i].Handler == handler)
+                if (ClientConnectHandlers[i].Handler == handler)
                 {
-                    s_ClientConnectHandlers.RemoveAt(i);
+                    ClientConnectHandlers.RemoveAt(i);
                 }
             }
         }
@@ -94,120 +91,24 @@ namespace Unity.LiveCapture.CompanionApp
 
                 foreach (var attribute in attributes)
                 {
-                    s_TypeToClientType[attribute.Type] = type;
+                    TypeToClientType[attribute.Type] = type;
                 }
             }
         }
 
-#if UNITY_EDITOR
-#pragma warning disable 414
-        [SerializeField, HideInInspector]
-        bool m_InterfacesExpanded = false;
-        [SerializeField, HideInInspector]
-        bool m_ClientsExpanded = true;
-#pragma warning restore 414
-#endif
-
-        [SerializeField, Tooltip("The TCP port on which the server will listen for incoming connections. Changes to the port only take effect after restarting the server.")]
-        int m_Port = k_DefaultPort;
-        [SerializeField, Tooltip("Start the server automatically after entering play mode.")]
-        bool m_AutoStartOnPlay = true;
-
-        readonly DiscoveryServer m_Discovery = new DiscoveryServer();
-        readonly NetworkServer m_Server = new NetworkServer();
-        readonly Dictionary<Remote, ICompanionAppClient> m_RemoteToClient = new Dictionary<Remote, ICompanionAppClient>();
-
-        /// <summary>
-        /// The TCP port on which the server will listen for incoming connections.
-        /// </summary>
-        /// <remarks>
-        /// Changes to the port only take effect after restarting the server.
-        /// </remarks>
-        public int Port
-        {
-            get => m_Port;
-            set
-            {
-                if (m_Port != value)
-                {
-                    m_Port = value;
-                    OnServerChanged(true);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Start the server automatically after entering play mode.
-        /// </summary>
-        public bool AutoStartOnPlay
-        {
-            get => m_AutoStartOnPlay;
-            set
-            {
-                if (m_AutoStartOnPlay != value)
-                {
-                    m_AutoStartOnPlay = value;
-                    OnServerChanged(true);
-                }
-            }
-        }
+        private readonly DiscoveryServer _discovery = new DiscoveryServer();
+        private readonly NetworkServer _server = new NetworkServer(new GameObject().AddComponent<UnityExecutor>());
+        private readonly Dictionary<Guid, ICompanionAppClient> _remoteToClient = new Dictionary<Guid, ICompanionAppClient>();
 
         /// <summary>
         /// Are clients able to connect to the server.
         /// </summary>
-        public bool IsRunning => m_Server.IsRunning;
+        public bool IsRunning => _server.IsRunning;
 
         /// <summary>
         /// The number of clients currently connected to the server.
         /// </summary>
-        public int ClientCount => m_RemoteToClient.Count;
-
-        /// <inheritdoc/>
-        protected override void OnEnable()
-        {
-            base.OnEnable();
-
-            m_Server.RemoteConnected += OnClientConnected;
-            m_Server.RemoteDisconnected += OnClientDisconnected;
-
-#if UNITY_EDITOR
-            EditorApplication.playModeStateChanged += PlayModeStateChanged;
-#endif
-        }
-
-        /// <inheritdoc/>
-        protected override void OnDisable()
-        {
-            base.OnDisable();
-
-            m_Discovery.Stop();
-            m_Server.Stop();
-
-            m_Server.RemoteConnected -= OnClientConnected;
-            m_Server.RemoteDisconnected -= OnClientDisconnected;
-
-#if UNITY_EDITOR
-            EditorApplication.playModeStateChanged -= PlayModeStateChanged;
-#endif
-        }
-
-#if UNITY_EDITOR
-        void PlayModeStateChanged(PlayModeStateChange state)
-        {
-            switch (state)
-            {
-                case PlayModeStateChange.EnteredPlayMode:
-                {
-                    if (m_AutoStartOnPlay)
-                    {
-                        StartServer();
-                    }
-                    break;
-                }
-            }
-        }
-
-#endif
+        public int ClientCount => _remoteToClient.Count;
 
         /// <summary>
         /// Gets the currently connected clients.
@@ -215,38 +116,48 @@ namespace Unity.LiveCapture.CompanionApp
         /// <returns>A new collection containing the client handles.</returns>
         public IEnumerable<ICompanionAppClient> GetClients()
         {
-            return m_RemoteToClient.Values;
+            return _remoteToClient.Values;
         }
-
-        /// <inheritdoc />
-        public override string GetName() => "Companion App Server";
 
         /// <summary>
         /// Start listening for clients connections.
         /// </summary>
-        public void StartServer()
+        /// <param name="port">The port on which server should start</param>
+        /// <returns>True if success</returns>
+        public bool StartServer(int port)
         {
-            if (!NetworkUtilities.IsPortAvailable(m_Port))
+            if (!NetworkUtilities.IsPortAvailable(port))
             {
-                Debug.LogError($"Unable to start server: Port {m_Port} is in use by another program! Close the other program, or assign a free port using the Live Capture Window.");
-                return;
+                Debug.LogError($"Unable to start server: Port {port} is in use by another program! Close the other program, or assign a free port using the Live Capture Window.");
+                return false;
             }
 
-            if (m_Server.StartServer(m_Port))
+            _server.Stopped += () =>
+            {
+                Debug.Log("Network server stopped");
+            };
+            _server.Started += () =>
+            {
+                Debug.Log("Network server started");
+            };
+            if (_server.StartServer(port))
             {
                 // start server discovery
                 var config = new ServerData(
                     "Live Capture",
                     Environment.MachineName,
-                    m_Server.ID,
+                    _server.ID,
                     PackageUtility.GetVersion(LiveCaptureInfo.Version)
                 );
-                var endPoints = m_Server.EndPoints.ToArray();
+                var endPoints = _server.EndPoints.ToArray();
 
-                m_Discovery.Start(config, endPoints);
+                _discovery.Start(config, endPoints);
             }
 
-            OnServerChanged(false);
+            _server.RemoteConnected += OnClientConnected;
+            _server.RemoteDisconnected += OnClientDisconnected;
+            
+            return true;
         }
 
         /// <summary>
@@ -254,27 +165,22 @@ namespace Unity.LiveCapture.CompanionApp
         /// </summary>
         public void StopServer()
         {
-            m_Server.Stop();
-            m_Discovery.Stop();
 
-            OnServerChanged(false);
-        }
-
-        /// <inheritdoc/>
-        public override void OnUpdate()
-        {
-            m_Server.Update();
-            m_Discovery.Update();
+            _server.RemoteConnected -= OnClientConnected;
+            _server.RemoteDisconnected -= OnClientDisconnected;
+            
+            _server.Stop();
+            _discovery.Stop();
         }
 
         void OnClientConnected(Remote remote)
         {
-            m_Server.RegisterMessageHandler(remote, InitializeClient, false);
+            _server.RegisterMessageHandler(remote, InitializeClient, false);
         }
 
         void OnClientDisconnected(Remote remote, DisconnectStatus status)
         {
-            if (m_RemoteToClient.TryGetValue(remote, out var client))
+            if (_remoteToClient.TryGetValue(remote.ID, out var client))
             {
                 try
                 {
@@ -285,8 +191,7 @@ namespace Unity.LiveCapture.CompanionApp
                     Debug.LogError(e);
                 }
 
-                m_RemoteToClient.Remove(remote);
-                OnServerChanged(false);
+                _remoteToClient.Remove(remote.ID);
             }
         }
 
@@ -301,7 +206,7 @@ namespace Unity.LiveCapture.CompanionApp
 
                 var streamReader = new StreamReader(message.Data, Encoding.UTF8);
                 var json = streamReader.ReadToEnd();
-                var data = default(ClientInitialization);
+                ClientInitialization data;
 
                 try
                 {
@@ -313,22 +218,27 @@ namespace Unity.LiveCapture.CompanionApp
                     return;
                 }
 
-                if (!s_TypeToClientType.TryGetValue(data.Type, out var clientType))
+                if (!TypeToClientType.TryGetValue(data.Type, out var clientType))
                 {
                     Debug.LogError($"Unknown client type \"{data.Type}\" connected to {nameof(CompanionAppServer)}!");
                     return;
                 }
 
-                var remote = message.Remote;
-                var client = Activator.CreateInstance(clientType, m_Server, remote, data) as CompanionAppClient;
-                client.SendProtocol();
+                if (RemoteFactoryStaticProvider.RemoteFactory.TryGetCreated(message.RemoteId, out var remote))
+                {
+                    var client = Activator.CreateInstance(clientType, _server, remote, data) as CompanionAppClient;
+                    client!.SendProtocol();
 
-                m_RemoteToClient.Add(remote, client);
+                    _remoteToClient.Add(remote.ID, client);
 
-                AssignOwner(client);
+                    AssignOwner(client);
 
-                ClientConnected.Invoke(client);
-                OnServerChanged(false);
+                    ClientConnected.Invoke(client);
+                }
+                else
+                {
+                    Debug.Log("Fail to determine remote");
+                }
             }
             catch (Exception e)
             {
@@ -343,7 +253,7 @@ namespace Unity.LiveCapture.CompanionApp
         static void AssignOwner(ICompanionAppClient client)
         {
             // connect to the registered handler that was most recently used with this client if possible
-            foreach (var handler in s_ClientConnectHandlers.OrderByDescending(h => h.Time.Ticks))
+            foreach (var handler in ClientConnectHandlers.OrderByDescending(h => h.Time.Ticks))
             {
                 try
                 {
@@ -360,7 +270,7 @@ namespace Unity.LiveCapture.CompanionApp
             }
 
             // fall back to the first free device that is compatible with the client
-            foreach (var handler in s_ClientConnectHandlers)
+            foreach (var handler in ClientConnectHandlers)
             {
                 try
                 {

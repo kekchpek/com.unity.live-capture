@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using UnityAuxiliaryTools.UnityExecutor;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -13,11 +14,8 @@ namespace Unity.LiveCapture.Networking
     /// </summary>
     abstract class NetworkBase
     {
-        /// <summary>
-        /// Used by the <see cref="m_ConnectionEvents"/> queue to perform actions that modify
-        /// connection state in the <see cref="Update"/> method in the same order the events were
-        /// submitted.
-        /// </summary>
+        private readonly IUnityExecutor _unityExecutor;
+
         readonly struct ConnectionEvent
         {
             public enum Type
@@ -58,12 +56,11 @@ namespace Unity.LiveCapture.Networking
         /// <summary>
         /// Is the networking started.
         /// </summary>
-        protected volatile bool m_IsRunning;
+        protected volatile bool MIsRunning;
 
-        readonly ConcurrentDictionary<Remote, Connection> m_RemoteToConnection = new ConcurrentDictionary<Remote, Connection>();
-        readonly ConcurrentQueue<ConnectionEvent> m_ConnectionEvents = new ConcurrentQueue<ConnectionEvent>();
-        readonly Dictionary<Remote, Action<Message>> m_MessageHandlers = new Dictionary<Remote, Action<Message>>();
-        readonly Dictionary<Remote, Queue<Message>> m_BufferedMessages = new Dictionary<Remote, Queue<Message>>();
+        private readonly ConcurrentDictionary<Remote, Connection> _remoteToConnection = new ConcurrentDictionary<Remote, Connection>();
+        private readonly Dictionary<Guid, Action<Message>> _messageHandlers = new Dictionary<Guid, Action<Message>>();
+        private readonly Dictionary<Guid, Queue<Message>> _bufferedMessages = new Dictionary<Guid, Queue<Message>>();
 
         /// <summary>
         /// The version of the networking protocol.
@@ -87,12 +84,12 @@ namespace Unity.LiveCapture.Networking
         /// <summary>
         /// Is the networking started.
         /// </summary>
-        public bool IsRunning => m_IsRunning;
+        public bool IsRunning => MIsRunning;
 
         /// <summary>
         /// The number of connected remotes.
         /// </summary>
-        public int RemoteCount => m_RemoteToConnection.Count;
+        public int RemoteCount => _remoteToConnection.Count;
 
         /// <summary>
         /// Gets a new list containing all the remotes that this instance can send messages
@@ -102,9 +99,9 @@ namespace Unity.LiveCapture.Networking
         {
             get
             {
-                var result = new List<Remote>(m_RemoteToConnection.Count);
+                var result = new List<Remote>(_remoteToConnection.Count);
 
-                foreach (var remoteConnection in m_RemoteToConnection)
+                foreach (var remoteConnection in _remoteToConnection)
                     result.Add(remoteConnection.Key);
 
                 return result;
@@ -137,8 +134,9 @@ namespace Unity.LiveCapture.Networking
         /// <summary>
         /// Creates a new <see cref="NetworkBase"/> instance.
         /// </summary>
-        protected NetworkBase()
+        protected NetworkBase(IUnityExecutor unityExecutor)
         {
+            _unityExecutor = unityExecutor ?? throw new ArgumentNullException(nameof(unityExecutor));
             // when using sockets, we need to be very careful to close them before trying to unload the domain
             Application.quitting += () => Stop(false);
 #if UNITY_EDITOR
@@ -158,7 +156,7 @@ namespace Unity.LiveCapture.Networking
             if (remote == null)
                 throw new ArgumentNullException(nameof(remote));
 
-            return m_RemoteToConnection.ContainsKey(remote);
+            return _remoteToConnection.ContainsKey(remote);
         }
 
         /// <summary>
@@ -181,20 +179,20 @@ namespace Unity.LiveCapture.Networking
                 throw new ArgumentNullException(nameof(remote));
             if (remote == Remote.All)
                 throw new ArgumentException($"{nameof(Remote)}.{nameof(Remote.All)} cannot be used, message handlers must be registered per remote.", nameof(remote));
-            if (!m_RemoteToConnection.ContainsKey(remote))
+            if (!_remoteToConnection.ContainsKey(remote))
                 throw new ArgumentException($"Remote {remote} is currently not connected to this instance.", nameof(remote));
             if (messageHandler == null)
                 throw new ArgumentNullException(nameof(messageHandler));
 
             try
             {
-                if (m_MessageHandlers.TryGetValue(remote, out var currentHandler))
+                if (_messageHandlers.TryGetValue(remote.ID, out var currentHandler))
                     return currentHandler == messageHandler;
 
-                m_MessageHandlers.Add(remote, messageHandler);
+                _messageHandlers.Add(remote.ID, messageHandler);
 
                 // if we are not handling buffered messages, they must be disposed and discarded
-                if (m_BufferedMessages.TryGetValue(remote, out var messages))
+                if (_bufferedMessages.TryGetValue(remote.ID, out var messages))
                 {
                     foreach (var message in messages)
                     {
@@ -239,12 +237,12 @@ namespace Unity.LiveCapture.Networking
                 throw new ArgumentNullException(nameof(remote));
             if (remote == Remote.All)
                 throw new ArgumentException($"{nameof(Remote)}.{nameof(Remote.All)} cannot be used, message handlers must be deregistered per remote.", nameof(remote));
-            if (!m_RemoteToConnection.ContainsKey(remote))
+            if (!_remoteToConnection.ContainsKey(remote))
                 throw new ArgumentException($"Remote {remote} is currently not connected to this instance.", nameof(remote));
 
             try
             {
-                return !m_MessageHandlers.ContainsKey(remote) || m_MessageHandlers.Remove(remote);
+                return !_messageHandlers.ContainsKey(remote.ID) || _messageHandlers.Remove(remote.ID);
             }
             catch (Exception e)
             {
@@ -271,22 +269,26 @@ namespace Unity.LiveCapture.Networking
             try
             {
                 var packet = new Packet(message, Packet.Type.Generic);
-                var remote = message.Remote;
-
-                if (remote == Remote.All)
+                if (RemoteFactoryStaticProvider.RemoteFactory.TryGetCreated(message.RemoteId, out var remote))
                 {
-                    foreach (var remoteConnection in m_RemoteToConnection)
-                        remoteConnection.Value.Send(packet, false);
+                    if (remote == Remote.All)
+                    {
+                        foreach (var remoteConnection in _remoteToConnection)
+                            remoteConnection.Value.Send(packet, false);
+                    }
+                    else
+                    {
+                        if (!_remoteToConnection.TryGetValue(remote, out var connection))
+                            throw new Exception($"There is currently no connection to remote {remote}.");
+
+                        connection.Send(packet, false);
+                    }
+                    return true;
                 }
                 else
                 {
-                    if (!m_RemoteToConnection.TryGetValue(remote, out var connection))
-                        throw new Exception($"There is currently no connection to remote {remote}.");
-
-                    connection.Send(packet, false);
+                    throw new Exception("Message addressed to unknown remote!");
                 }
-
-                return true;
             }
             catch (Exception e)
             {
@@ -298,51 +300,33 @@ namespace Unity.LiveCapture.Networking
         /// <summary>
         /// Called to invoke the events and callbacks.
         /// </summary>
-        public void Update()
+        private void HandleConnectionEvent(ConnectionEvent e)
         {
-            if (!IsRunning)
-                return;
-
-            while (m_ConnectionEvents.TryDequeue(out var e))
+            switch (e.EventType)
             {
-                switch (e.EventType)
+                case ConnectionEvent.Type.NewConnection:
                 {
-                    case ConnectionEvent.Type.NewConnection:
+                    var remote = e.Connection.Remote;
+
+                    if (_remoteToConnection.TryGetValue(remote, out var oldConnection))
+                        oldConnection.Close(DisconnectStatus.Reconnected);
+
+                    _remoteToConnection.TryAdd(remote, e.Connection);
+
+                    try
                     {
-                        var remote = e.Connection.Remote;
-
-                        if (m_RemoteToConnection.TryGetValue(remote, out var oldConnection))
-                            oldConnection.Close(DisconnectStatus.Reconnected);
-
-                        m_RemoteToConnection.TryAdd(remote, e.Connection);
-
-                        try
-                        {
-                            RemoteConnected?.Invoke(remote);
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.LogException(ex);
-                        }
-                        break;
+                        RemoteConnected?.Invoke(remote);
                     }
-                    case ConnectionEvent.Type.TerminateConnection:
+                    catch (Exception ex)
                     {
-                        e.Connection.Close(DisconnectStatus.Error);
-                        break;
+                        Debug.LogException(ex);
                     }
+                    break;
                 }
-            }
-
-            foreach (var remoteConnection in m_RemoteToConnection)
-            {
-                try
+                case ConnectionEvent.Type.TerminateConnection:
                 {
-                    remoteConnection.Value.Update();
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"Failed to update connection: {e}");
+                    e.Connection.Close(DisconnectStatus.Error);
+                    break;
                 }
             }
         }
@@ -355,18 +339,17 @@ namespace Unity.LiveCapture.Networking
         /// This may block for many seconds in the worst case.</param>
         public virtual void Stop(bool graceful = true)
         {
-            if (!m_IsRunning)
+            if (!MIsRunning)
                 return;
 
-            m_IsRunning = false;
+            MIsRunning = false;
 
             DisconnectInternal(Remote.All, graceful);
 
             // ensure all the collections are reset
-            while (m_ConnectionEvents.TryDequeue(out _)) {}
-            m_RemoteToConnection.Clear();
-            m_BufferedMessages.Clear();
-            m_MessageHandlers.Clear();
+            _remoteToConnection.Clear();
+            _bufferedMessages.Clear();
+            _messageHandlers.Clear();
 
             try
             {
@@ -396,12 +379,13 @@ namespace Unity.LiveCapture.Networking
         /// This may block for many seconds in the worst case.</param>
         internal void DisconnectInternal(Remote remote, bool graceful)
         {
+            Debug.Log("DisconnectInternal");
             if (remote == Remote.All)
             {
-                foreach (var remoteConnection in m_RemoteToConnection)
+                foreach (var remoteConnection in _remoteToConnection)
                     Disconnect(remoteConnection.Value, graceful);
             }
-            else if (m_RemoteToConnection.TryGetValue(remote, out var connection))
+            else if (_remoteToConnection.TryGetValue(remote, out var connection))
             {
                 Disconnect(connection, graceful);
             }
@@ -409,6 +393,7 @@ namespace Unity.LiveCapture.Networking
 
         void Disconnect(Connection connection, bool graceful)
         {
+            Debug.Log("Disconnect");
             try
             {
                 // If disconnecting gracefully we need to send the disconnect message synchronously,
@@ -416,14 +401,11 @@ namespace Unity.LiveCapture.Networking
                 // to the remote.
                 if (graceful)
                 {
-                    var message = Message.Get(connection.Remote, ChannelType.ReliableOrdered);
+                    var message = Message.Get(connection.Remote.ID, ChannelType.ReliableOrdered);
                     var packet = new Packet(message, Packet.Type.Disconnect);
 
                     connection.Send(packet, true);
                 }
-
-                // ensure all available messages are read before they are disposed
-                connection.Update();
                 connection.Close(DisconnectStatus.Graceful);
             }
             catch (Exception e)
@@ -436,30 +418,33 @@ namespace Unity.LiveCapture.Networking
         /// Executes the registered message handler for a message.
         /// </summary>
         /// <param name="message">The message to receive.</param>
-        internal void ReceiveMessage(Message message)
+        internal void HandleMessage(Message message)
         {
-            var remote = message.Remote;
+            var remoteId = message.RemoteId;
 
             // Check if there is message handler which receives the messages
             // from this remote. If there is none, we should buffer them
             // until there is a handler.
-            if (m_MessageHandlers.TryGetValue(remote, out var handler))
+            if (_messageHandlers.TryGetValue(remoteId, out var handler))
             {
-                try
+                _unityExecutor.ExecuteOnFixedUpdate(() =>
                 {
-                    handler?.Invoke(message);
-                }
-                catch (Exception e)
-                {
-                    Debug.LogException(e);
-                }
+                    try
+                    {
+                        handler?.Invoke(message);
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogException(e);
+                    }
+                });
             }
             else
             {
-                if (!m_BufferedMessages.TryGetValue(remote, out var messages))
+                if (!_bufferedMessages.TryGetValue(remoteId, out var messages))
                 {
                     messages = new Queue<Message>();
-                    m_BufferedMessages.Add(remote, messages);
+                    _bufferedMessages.Add(remoteId, messages);
                 }
                 messages.Enqueue(message);
             }
@@ -471,10 +456,11 @@ namespace Unity.LiveCapture.Networking
         /// <param name="connection">The new connection.</param>
         internal void RegisterConnection(Connection connection)
         {
+            Debug.Log("RegisterConnection");
             // register the connection on the next update so we can invoke the remote connected event
             // on the correct thread and ensure there are no ordering issues compared to terminated
             // connections.
-            m_ConnectionEvents.Enqueue(new ConnectionEvent(connection, ConnectionEvent.Type.NewConnection));
+            HandleConnectionEvent(new ConnectionEvent(connection, ConnectionEvent.Type.NewConnection));
         }
 
         /// <summary>
@@ -484,19 +470,20 @@ namespace Unity.LiveCapture.Networking
         /// <param name="status">How the connection was terminated.</param>
         internal void DeregisterConnection(Connection connection, DisconnectStatus status)
         {
+            Debug.Log("DeregisterConnection");
             var remote = connection.Remote;
 
-            m_RemoteToConnection.TryRemove(remote, out _);
+            _remoteToConnection.TryRemove(remote, out _);
 
-            if (m_BufferedMessages.TryGetValue(remote, out var bufferedMessages))
+            if (_bufferedMessages.TryGetValue(remote.ID, out var bufferedMessages))
             {
                 foreach (var message in bufferedMessages)
                     message.Dispose();
 
                 bufferedMessages.Clear();
             }
-            m_BufferedMessages.Remove(remote);
-            m_MessageHandlers.Remove(remote);
+            _bufferedMessages.Remove(remote.ID);
+            _messageHandlers.Remove(remote.ID);
 
             try
             {
@@ -515,9 +502,10 @@ namespace Unity.LiveCapture.Networking
         /// <param name="connection">The connection to close.</param>
         internal void OnSocketError(Connection connection)
         {
+            Debug.Log("SocketError");
             // We can't close connections on other threads, so we close the connection
             // on the next update.
-            m_ConnectionEvents.Enqueue(new ConnectionEvent(connection, ConnectionEvent.Type.TerminateConnection));
+            HandleConnectionEvent(new ConnectionEvent(connection, ConnectionEvent.Type.TerminateConnection));
         }
 
         /// <summary>
@@ -541,10 +529,11 @@ namespace Unity.LiveCapture.Networking
         /// </summary>
         /// <param name="tcp">A TCP socket that has just finished connecting.</param>
         /// <param name="udp">The UDP socket to use for this connection.</param>
-        protected void DoHandshake(NetworkSocket tcp, NetworkSocket udp)
+        protected void DoHandshake(INetworkSocket tcp, INetworkSocket udp)
         {
-            var remote = new Remote(Guid.Empty, tcp.RemoteEndPoint, null);
-            var message = Message.Get(remote, ChannelType.ReliableOrdered);
+            Debug.Log("DoHandshake");
+            var remote = RemoteFactoryStaticProvider.RemoteFactory.Create(Guid.Empty, tcp.RemoteEndPoint, null);
+            var message = Message.Get(remote.ID, ChannelType.ReliableOrdered);
             var packet = new Packet(message, Packet.Type.Initialization);
 
             message.Data.WriteStruct(new VersionData(ProtocolVersion));

@@ -169,8 +169,6 @@ namespace Unity.LiveCapture.Networking.Protocols
         /// <typeparam name="TSender">The type of the message sender.</typeparam>
         /// <returns>The message instance.</returns>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="id"/> is null.</exception>
-        /// <exception cref="ArgumentException">Thrown if there is no message with the given ID, or the message
-        /// is not a <typeparamref name="TReceiver"/>.</exception>
         public TSender GetDataSender<T, TSender>(string id) where TSender : DataSender<T>
         {
             if (id == null)
@@ -255,11 +253,11 @@ namespace Unity.LiveCapture.Networking.Protocols
         internal void SendMessage(EventSender sender)
         {
             if (m_Network == null || m_Remote == null)
-                new InvalidOperationException($"Cannot send message \"{sender}\" on protocol \"{this}\" since a network has not been assigned.");
+                throw new InvalidOperationException($"Cannot send message \"{sender}\" on protocol \"{this}\" since a network has not been assigned.");
 
             if (m_Network.IsConnected(m_Remote))
             {
-                var message = Message.Get(m_Remote, sender.Channel);
+                var message = Message.Get(m_Remote.ID, sender.Channel);
                 message.Data.WriteStruct(sender.Code);
 
                 m_Network.SendMessage(message);
@@ -269,11 +267,11 @@ namespace Unity.LiveCapture.Networking.Protocols
         internal void SendMessage<T>(DataSender<T> sender, ref T data)
         {
             if (m_Network == null || m_Remote == null)
-                new InvalidOperationException($"Cannot send message \"{sender}\" on protocol \"{this}\" since a network has not been assigned.");
+                throw new InvalidOperationException($"Cannot send message \"{sender}\" on protocol \"{this}\" since a network has not been assigned.");
 
             if (m_Network.IsConnected(m_Remote))
             {
-                var message = Message.Get(m_Remote, sender.Channel);
+                var message = Message.Get(m_Remote.ID, sender.Channel);
                 message.Data.WriteStruct(sender.Code);
                 sender.Write(message.Data, ref data);
 
