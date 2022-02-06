@@ -116,7 +116,6 @@ namespace Unity.LiveCapture.Networking.Discovery
             CreateSendSockets();
 
             // when using sockets, we need to be very careful to close them before trying to unload the domain
-            Application.quitting += Stop;
 
             StartTicking(_tickingCancellationToken);
             IsRunning = true;
@@ -128,8 +127,6 @@ namespace Unity.LiveCapture.Networking.Discovery
         /// </summary>
         public void Stop()
         {
-            Application.quitting -= Stop;
-
             OnStop();
 
             if (_receiveSocket != null)
