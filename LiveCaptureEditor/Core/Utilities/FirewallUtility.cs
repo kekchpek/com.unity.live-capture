@@ -21,11 +21,7 @@ namespace Unity.LiveCapture.Editor
         {
             get
             {
-#if UNITY_EDITOR_WIN
-                return true;
-#else
-                return false;
-#endif
+                return SystemInfo.operatingSystemFamily == OperatingSystemFamily.Windows;
             }
         }
 
@@ -49,57 +45,60 @@ namespace Unity.LiveCapture.Editor
                 return false;
             }
 
-#if UNITY_EDITOR_WIN
-            var ruleName = $"Unity {Application.unityVersion} Live Capture";
-
-            var info = new ProcessStartInfo
+            if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.Windows)
             {
-                FileName = "netsh",
-                Arguments = $"advfirewall firewall show rule name=\"{ruleName}\"",
-                // don't use a command line so we can read the standard output
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                // hide windows opened by the process
-                WindowStyle = ProcessWindowStyle.Hidden,
-                CreateNoWindow = true,
-            };
+                var ruleName = $"Unity {Application.unityVersion} Live Capture";
 
-            try
-            {
-                using (var process = Process.Start(info))
+                var info = new ProcessStartInfo
                 {
-                    var hasExited = process.WaitForExit(2000);
+                    FileName = "netsh",
+                    Arguments = $"advfirewall firewall show rule name=\"{ruleName}\"",
+                    // don't use a command line so we can read the standard output
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    // hide windows opened by the process
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    CreateNoWindow = true,
+                };
 
-                    if (!hasExited)
+                try
+                {
+                    using (var process = Process.Start(info))
                     {
-                        process.Kill();
-                        Debug.LogWarning($"Failed to get firewall rules, netsh did not exit successfully.");
-                        return false;
-                    }
+                        var hasExited = process.WaitForExit(2000);
 
-                    var output = process.StandardOutput.ReadToEnd();
+                        if (!hasExited)
+                        {
+                            process.Kill();
+                            Debug.LogWarning($"Failed to get firewall rules, netsh did not exit successfully.");
+                            return false;
+                        }
 
-                    switch (process.ExitCode)
-                    {
-                        case 0: // success
-                            return CheckForRule(output, "In") && CheckForRule(output, "Out");
-                        case 1: // no matching rules found. Not in the docs, found this out experimentally
-                            return false;
-                        default: // assume there is an error otherwise
-                            Debug.LogError($"Failed to get firewall rules with exit code {process.ExitCode:X}: ({output})!");
-                            return false;
+                        var output = process.StandardOutput.ReadToEnd();
+
+                        switch (process.ExitCode)
+                        {
+                            case 0: // success
+                                return CheckForRule(output, "In") && CheckForRule(output, "Out");
+                            case 1: // no matching rules found. Not in the docs, found this out experimentally
+                                return false;
+                            default: // assume there is an error otherwise
+                                Debug.LogError($"Failed to get firewall rules with exit code {process.ExitCode:X}: ({output})!");
+                                return false;
+                        }
                     }
                 }
+                catch (Exception e)
+                {
+                    Debug.LogError($"Failed to get firewall rule: {e}");
+                    return false;
+                }
             }
-            catch (Exception e)
+            else
             {
-                Debug.LogError($"Failed to get firewall rule: {e}");
                 return false;
             }
-#else
-            return false;
-#endif
         }
 
         /// <summary>
@@ -123,67 +122,69 @@ namespace Unity.LiveCapture.Editor
                 return;
             }
 
-#if UNITY_EDITOR_WIN
-            var programPath = Path.GetFullPath(EditorApplication.applicationPath);
-            var ruleName = $"Unity {Application.unityVersion} Live Capture";
-
-            // We need to supply all the commands in a single line.
-            // Commands separated by '&' are executed even if a previous command fails.
-            var args = new StringBuilder();
-            args.Append($"netsh advfirewall firewall add rule name=\"{ruleName}\" program=\"{programPath}\" dir=in profile=private,domain action=allow enable=yes");
-            args.Append("&");
-            args.Append($"netsh advfirewall firewall add rule name=\"{ruleName}\" program=\"{programPath}\" dir=out profile=private,domain action=allow enable=yes");
-            args.Append("&");
-            args.Append("exit");
-
-            // run the commands from a command line
-            var info = new ProcessStartInfo
+            if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.Windows)
             {
-                FileName = "cmd",
-                Arguments = $"/k {args}",
-                UseShellExecute = true,
-                // Attempts to run with elevated permissions. This is mandatory when modifying firewall rules.
-                // If User Account Control notifications are enabled, a pop-up will appear asking for permission,
-                // otherwise the process can execute without user input.
-                Verb = "runas",
-            };
+                var programPath = Path.GetFullPath(EditorApplication.applicationPath);
+                var ruleName = $"Unity {Application.unityVersion} Live Capture";
 
-            try
-            {
-                var process = new Process
+                // We need to supply all the commands in a single line.
+                // Commands separated by '&' are executed even if a previous command fails.
+                var args = new StringBuilder();
+                args.Append($"netsh advfirewall firewall add rule name=\"{ruleName}\" program=\"{programPath}\" dir=in profile=private,domain action=allow enable=yes");
+                args.Append("&");
+                args.Append($"netsh advfirewall firewall add rule name=\"{ruleName}\" program=\"{programPath}\" dir=out profile=private,domain action=allow enable=yes");
+                args.Append("&");
+                args.Append("exit");
+
+                // run the commands from a command line
+                var info = new ProcessStartInfo
                 {
-                    StartInfo = info,
-                    EnableRaisingEvents = true,
+                    FileName = "cmd",
+                    Arguments = $"/k {args}",
+                    UseShellExecute = true,
+                    // Attempts to run with elevated permissions. This is mandatory when modifying firewall rules.
+                    // If User Account Control notifications are enabled, a pop-up will appear asking for permission,
+                    // otherwise the process can execute without user input.
+                    Verb = "runas",
                 };
 
-                process.Exited += (sender, eventArgs) =>
+                try
                 {
-                    switch (process.ExitCode)
+                    var process = new Process
                     {
-                        case 0: // success
-                            FirewallConfigured?.Invoke(true);
-                            break;
-                        default: // assume there is an error otherwise
-                            Debug.LogError($"Failed to add firewall rules!");
-                            FirewallConfigured?.Invoke(false);
-                            break;
-                    }
-                    process.Dispose();
-                };
+                        StartInfo = info,
+                        EnableRaisingEvents = true,
+                    };
 
-                process.Start();
+                    process.Exited += (sender, eventArgs) =>
+                    {
+                        switch (process.ExitCode)
+                        {
+                            case 0: // success
+                                FirewallConfigured?.Invoke(true);
+                                break;
+                            default: // assume there is an error otherwise
+                                Debug.LogError($"Failed to add firewall rules!");
+                                FirewallConfigured?.Invoke(false);
+                                break;
+                        }
+                        process.Dispose();
+                    };
+
+                    process.Start();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"Failed to configure firewall: {e}");
+                    FirewallConfigured?.Invoke(false);
+                }
             }
-            catch (Exception e)
+            else
             {
-                Debug.LogError($"Failed to configure firewall: {e}");
                 FirewallConfigured?.Invoke(false);
             }
-#else
-            FirewallConfigured?.Invoke(false);
-#endif
         }
 
-#if UNITY_EDITOR_WIN
         static bool CheckForRule(string output, string direction)
         {
             // Sample output rule is below.
@@ -256,7 +257,5 @@ namespace Unity.LiveCapture.Editor
 
             return ruleMatches;
         }
-
-#endif
     }
 }
