@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UIElements;
 using UnityEditor;
+using UnityEditorInternal;
+using System.IO;
 
 namespace Unity.LiveCapture.Editor
 {
@@ -51,7 +53,7 @@ namespace Unity.LiveCapture.Editor
                 menu.AddItem(Contents.ResetLabel, false, reset =>
                 {
                     LiveCaptureSettings.Instance.Reset();
-                    LiveCaptureSettings.Save();
+                    Save(LiveCaptureSettings.Instance);
                 }, null);
                 menu.ShowAsContext();
             }
@@ -70,7 +72,7 @@ namespace Unity.LiveCapture.Editor
                 if (change.changed)
                 {
                     m_SerializedObject.ApplyModifiedPropertiesWithoutUndo();
-                    LiveCaptureSettings.Save();
+                    Save(LiveCaptureSettings.Instance);
                 }
             }
         }
@@ -91,6 +93,50 @@ namespace Unity.LiveCapture.Editor
                 SettingsScope.Project,
                 GetSearchKeywordsFromSerializedObject(new SerializedObject(LiveCaptureSettings.Instance))
             );
+        }
+
+        /// <summary>
+        /// Serializes the asset to disk.
+        /// </summary>
+        private static void Save<T>(SettingAsset<T> settingAsset) where T : ScriptableObject
+        {
+            if (settingAsset == null)
+            {
+                Debug.LogError($"Cannot save {nameof(SettingAsset<T>)}: no instance!");
+                return;
+            }
+
+            var filePath = GetFilePath<T>();
+
+            if (string.IsNullOrEmpty(filePath))
+            {
+                return;
+            }
+
+            var folderPath = Path.GetDirectoryName(filePath);
+
+            if (!Directory.Exists(folderPath))
+            {
+                Directory.CreateDirectory(folderPath);
+            }
+
+            InternalEditorUtility.SaveToSerializedFileAndForget(new[] { settingAsset }, filePath, true);
+        }
+
+        /// <summary>
+        /// Gets the file path of the asset relative to the project root folder.
+        /// </summary>
+        /// <returns>The file path of the asset.</returns>
+        protected static string GetFilePath<T>()
+        {
+            foreach (var customAttribute in typeof(T).GetCustomAttributes(true))
+            {
+                if (customAttribute is SettingFilePathAttribute attribute)
+                {
+                    return attribute.FilePath;
+                }
+            }
+            return string.Empty;
         }
     }
 }

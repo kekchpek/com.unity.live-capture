@@ -67,53 +67,6 @@ namespace Unity.LiveCapture
 
             return s_Instance;
         }
-
-#if UNITY_EDITOR
-        /// <summary>
-        /// Serializes the asset to disk.
-        /// </summary>
-        public static void Save()
-        {
-            if (s_Instance == null)
-            {
-                Debug.LogError($"Cannot save {nameof(SettingAsset<T>)}: no instance!");
-                return;
-            }
-
-            var filePath = GetFilePath();
-
-            if (string.IsNullOrEmpty(filePath))
-            {
-                return;
-            }
-
-            var folderPath = Path.GetDirectoryName(filePath);
-
-            if (!Directory.Exists(folderPath))
-            {
-                Directory.CreateDirectory(folderPath);
-            }
-
-            InternalEditorUtility.SaveToSerializedFileAndForget(new[] { s_Instance }, filePath, true);
-        }
-
-        /// <summary>
-        /// Gets the file path of the asset relative to the project root folder.
-        /// </summary>
-        /// <returns>The file path of the asset.</returns>
-        protected static string GetFilePath()
-        {
-            foreach (var customAttribute in typeof(T).GetCustomAttributes(true))
-            {
-                if (customAttribute is SettingFilePathAttribute attribute)
-                {
-                    return attribute.FilePath;
-                }
-            }
-            return string.Empty;
-        }
-
-#endif
     }
 
     /// <summary>
