@@ -8,13 +8,4 @@
     <PackageReference Include="UnityAuxiliaryTools" Version="0.2.2" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Reference Include="UnityEditor">
-      <HintPath>Libs\UnityEditor.dll</HintPath>
-    </Reference>
-    <Reference Include="UnityEngine">
-      <HintPath>Libs\UnityEngine.dll</HintPath>
-    </Reference>
-  </ItemGroup>
-
 </Project>
