@@ -12,6 +12,9 @@
     <Reference Include="Unity.Timeline.Editor">
       <HintPath>..\Libs\Unity.Timeline.Editor1.4.6.dll</HintPath>
     </Reference>
+    <Reference Include="Unity.Timeline">
+      <HintPath>..\Libs\Unity.Timeline1.4.6.dll</HintPath>
+    </Reference>
     <Reference Include="UnityEditor">
       <HintPath>..\Libs\UnityEditor.dll</HintPath>
     </Reference>
