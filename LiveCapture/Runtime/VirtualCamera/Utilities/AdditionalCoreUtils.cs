@@ -88,14 +88,17 @@ namespace Unity.LiveCapture.VirtualCamera
         {
             if (obj != null)
             {
-#if UNITY_EDITOR
-                if (Application.isPlaying)
-                    Object.Destroy(obj);
+                if (Application.isEditor)
+                {
+                    if (Application.isPlaying)
+                        Object.Destroy(obj);
+                    else
+                        Object.DestroyImmediate(obj);
+                }
                 else
-                    Object.DestroyImmediate(obj);
-#else
-                Object.Destroy(obj);
-#endif
+                {
+                    Object.Destroy(obj);
+                }
                 obj = null;
             }
         }
