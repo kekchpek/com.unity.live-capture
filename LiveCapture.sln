@@ -5,7 +5,7 @@ VisualStudioVersion = 16.0.31702.278
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LiveCapture", "LiveCapture\LiveCapture.csproj", "{42390485-D12A-4862-AEE3-1C5280A05E98}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiveCaptureEditor", "LiveCaptureEditor\LiveCaptureEditor.csproj", "{233F0B4D-FACE-4657-8D88-5DE4A93F19A6}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LiveCaptureEditor", "LiveCaptureEditor\LiveCaptureEditor.csproj", "{233F0B4D-FACE-4657-8D88-5DE4A93F19A6}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
