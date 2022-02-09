@@ -9,6 +9,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Reference Include="Unity.Timeline.Editor">
+      <HintPath>..\Libs\Unity.Timeline.Editor1.4.6.dll</HintPath>
+    </Reference>
     <Reference Include="UnityEditor">
       <HintPath>..\Libs\UnityEditor.dll</HintPath>
     </Reference>
@@ -18,8 +21,20 @@
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>..\Libs\UnityEngine.CoreModule.dll</HintPath>
     </Reference>
+    <Reference Include="UnityEngine.DirectorModule">
+      <HintPath>..\Libs\UnityEngine.DirectorModule.dll</HintPath>
+    </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>..\Libs\UnityEngine.IMGUIModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>..\Libs\UnityEngine.UI.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UIElementsModule">
+      <HintPath>..\Libs\UnityEngine.UIElementsModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>..\Libs\UnityEngine.UIModule.dll</HintPath>
     </Reference>
   </ItemGroup>
 
