@@ -1,4 +1,3 @@
-#if UNITY_EDITOR
 using UnityEditor;
 using UnityEngine;
 
@@ -13,4 +12,3 @@ namespace Unity.LiveCapture.ARKitFaceCapture.DefaultMapper
         }
     }
 }
-#endif
