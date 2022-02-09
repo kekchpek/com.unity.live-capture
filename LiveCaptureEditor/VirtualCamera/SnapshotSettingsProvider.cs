@@ -1,3 +1,4 @@
+using LiveCaptureEditor.VirtualCamera.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -53,7 +54,7 @@ namespace Unity.LiveCapture.VirtualCamera.Editor
                 menu.AddItem(Contents.ResetLabel, false, reset =>
                 {
                     SnapshotSettings.Instance.Reset();
-                    SnapshotSettings.Save();
+                    SettingsProviderUtils.Save(SnapshotSettings.Instance);
                 }, null);
                 menu.ShowAsContext();
             }
@@ -71,7 +72,7 @@ namespace Unity.LiveCapture.VirtualCamera.Editor
                 if (change.changed)
                 {
                     m_SerializedObject.ApplyModifiedPropertiesWithoutUndo();
-                    SnapshotSettings.Save();
+                    SettingsProviderUtils.Save(SnapshotSettings.Instance);
                 }
             }
         }

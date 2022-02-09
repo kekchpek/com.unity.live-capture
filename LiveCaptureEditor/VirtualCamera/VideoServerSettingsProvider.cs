@@ -1,3 +1,4 @@
+using LiveCaptureEditor.VirtualCamera.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -86,7 +87,7 @@ namespace Unity.LiveCapture.VirtualCamera.Editor
                 menu.AddItem(Contents.ResetLabel, false, reset =>
                 {
                     VideoServerSettings.Instance.Reset();
-                    VideoServerSettings.Save();
+                    SettingsProviderUtils.Save(VideoServerSettings.Instance);
                 }, null);
                 menu.ShowAsContext();
             }
@@ -108,7 +109,7 @@ namespace Unity.LiveCapture.VirtualCamera.Editor
                 if (change.changed)
                 {
                     m_SerializedObject.ApplyModifiedPropertiesWithoutUndo();
-                    VideoServerSettings.Save();
+                    SettingsProviderUtils.Save(VideoServerSettings.Instance);
                 }
             }
         }
