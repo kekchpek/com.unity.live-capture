@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using SocialDemo.Code.Auxiliary.UnityExecutor;
+using UnityAuxiliaryTools.UnityExecutor;
 using Unity.LiveCapture.Networking;
 using Unity.LiveCapture.Networking.Discovery;
 using UnityEngine;
