@@ -1,8 +1,5 @@
 using System;
 using UnityEngine;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
 
 namespace Unity.LiveCapture.ARKitFaceCapture.DefaultMapper
 {
@@ -12,20 +9,20 @@ namespace Unity.LiveCapture.ARKitFaceCapture.DefaultMapper
     [Serializable]
     class BindingConfig : IDrawable
     {
-        enum Type
+        internal enum Type
         {
             Simple,
             Curve,
         }
 
         [SerializeField, Tooltip("Whether the smoothing value set on this binding overrides the default value for the mapper.")]
-        bool m_OverrideSmoothing;
+        internal bool m_OverrideSmoothing;
         [SerializeField]
-        float m_Smoothing = 0.1f;
+        internal float m_Smoothing = 0.1f;
         [SerializeField]
-        EvaluatorPreset m_EvaluatorPreset = null;
+        internal EvaluatorPreset m_EvaluatorPreset = null;
         [SerializeField]
-        Type m_Type = Type.Simple;
+        internal Type m_Type = Type.Simple;
         [SerializeField]
         SimpleEvaluator.Impl m_SimpleEvaluator = new SimpleEvaluator.Impl();
         [SerializeField]
@@ -68,63 +65,5 @@ namespace Unity.LiveCapture.ARKitFaceCapture.DefaultMapper
                     throw new ArgumentOutOfRangeException();
             }
         }
-
-#if UNITY_EDITOR
-        static class Contents
-        {
-            public static readonly GUIContent OverrideSmoothing = new GUIContent("Override Smoothing", "Whether the smoothing value set on this binding overrides the default value for the mapper.");
-            public static readonly GUIContent Smoothing = new GUIContent("Smoothing", "The amount of smoothing to apply to the blend shape value. " +
-                "It can help reduce jitter in the face capture, but it will also smooth out fast motions.");
-            public static readonly GUIContent EvaluatorPreset = new GUIContent("Evaluator Preset", "A preset evaluation function to use. " +
-                "If none is assigned, a new function must be configured for this blend shape.");
-            public static readonly GUIContent Type = new GUIContent("Type", "The type of evaluation function to use when a preset is not assigned.");
-        }
-
-        /// <inheritdoc/>
-        public float GetHeight()
-        {
-            const int lines = 3;
-            var height = (lines * EditorGUIUtility.singleLineHeight) + ((lines - 1) * EditorGUIUtility.standardVerticalSpacing);
-
-            if (m_EvaluatorPreset == null)
-            {
-                height += EditorGUIUtility.standardVerticalSpacing + EditorGUIUtility.singleLineHeight;
-                height += EditorGUIUtility.standardVerticalSpacing + GetEvaluator().GetHeight();
-            }
-
-            return height;
-        }
-
-        /// <inheritdoc/>
-        public void OnGUI(Rect rect)
-        {
-            var line = rect;
-            line.height = EditorGUIUtility.singleLineHeight;
-
-            m_OverrideSmoothing = EditorGUI.Toggle(line, Contents.OverrideSmoothing, m_OverrideSmoothing);
-            GUIUtils.NextLine(ref line);
-
-            using (new EditorGUI.DisabledScope(!m_OverrideSmoothing))
-            {
-                EditorGUI.indentLevel++;
-                m_Smoothing = EditorGUI.Slider(line, Contents.Smoothing, m_Smoothing, 0f, 1f);
-                EditorGUI.indentLevel--;
-            }
-
-            GUIUtils.NextLine(ref line);
-            m_EvaluatorPreset = EditorGUI.ObjectField(line, Contents.EvaluatorPreset, m_EvaluatorPreset, typeof(EvaluatorPreset), false) as EvaluatorPreset;
-
-            if (m_EvaluatorPreset == null)
-            {
-                GUIUtils.NextLine(ref line);
-                m_Type = (Type)EditorGUI.EnumPopup(line, Contents.Type, m_Type);
-
-                var evaluatorRect = rect;
-                evaluatorRect.yMin = line.yMax;
-                GetEvaluator().OnGUI(evaluatorRect);
-            }
-        }
-
-#endif
     }
 }

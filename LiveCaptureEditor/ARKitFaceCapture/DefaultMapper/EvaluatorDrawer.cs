@@ -1,6 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 using Unity.LiveCapture.Editor;
+using LiveCaptureEditor.ARKitFaceCapture.Extensions;
 
 namespace Unity.LiveCapture.ARKitFaceCapture.DefaultMapper.Editor
 {
