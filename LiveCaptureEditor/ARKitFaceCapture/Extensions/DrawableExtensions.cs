@@ -12,7 +12,8 @@ namespace LiveCaptureEditor.ARKitFaceCapture.Extensions
         private static IDictionary<Type, IDrawableHandler> _drawablesHandlers = new Dictionary<Type, IDrawableHandler>
         {
             { typeof(BindingConfig), new BindingConfigHandler() },
-            { typeof(CurveEvaluator.Impl), new CurveEvaluatorHandler() }
+            { typeof(CurveEvaluator.Impl), new CurveEvaluatorHandler() },
+            { typeof(SimpleEvaluator.Impl), new SimpleEvaluatorHandler() }
         };
 
         /// <summary>

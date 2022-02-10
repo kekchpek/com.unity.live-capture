@@ -1,8 +1,5 @@
 using System;
 using UnityEngine;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
 
 namespace Unity.LiveCapture.ARKitFaceCapture.DefaultMapper
 {
@@ -19,7 +16,7 @@ namespace Unity.LiveCapture.ARKitFaceCapture.DefaultMapper
             /// <summary>
             /// How the evaluated blend shape value should behave as it reaches the maximum value.
             /// </summary>
-            enum Clamping
+            internal enum Clamping
             {
                 /// <summary>
                 /// Clamp using a max function.
@@ -32,13 +29,13 @@ namespace Unity.LiveCapture.ARKitFaceCapture.DefaultMapper
             }
 
             [SerializeField]
-            float m_Multiplier = 100f;
+            internal float m_Multiplier = 100f;
             [SerializeField]
-            float m_Offset = 0f;
+            internal float m_Offset = 0f;
             [SerializeField]
-            float m_Max = 100f;
+            internal float m_Max = 100f;
             [SerializeField]
-            Clamping m_Clamping = Clamping.Hard;
+            internal Clamping m_Clamping = Clamping.Hard;
 
             /// <inheritdoc />
             public float Evaluate(float value)
@@ -66,43 +63,6 @@ namespace Unity.LiveCapture.ARKitFaceCapture.DefaultMapper
                 t = (0.5f * t) + 0.5f;
                 return ((t * t * (6f - 4f * t)) - 1f) * (b - a) + a;
             }
-
-#if UNITY_EDITOR
-            static class Contents
-            {
-                public static readonly GUIContent Multiplier = new GUIContent("Multiplier", "The scaling coefficient applied to the blend shape value. " +
-                    "Larger values make the character more expressive.");
-                public static readonly GUIContent Offset = new GUIContent("Offset", "Offsets the zero value of the blend shape. " +
-                    "Non-zero values will change the face's resting pose.");
-                public static readonly GUIContent Max = new GUIContent("Max", "The maximum value the blend shape can reach. " +
-                    "Values larger than 100 allow the blend shape to go past its default extremes, while smaller values constrain them.");
-                public static readonly GUIContent Clamping = new GUIContent("Clamping", "Controls how the evaluated blend shape value should behave as it reaches the maximum value. " +
-                    "Soft clamping will ease near the max value, while hard clamping will not.");
-            }
-
-            /// <inheritdoc/>
-            public float GetHeight()
-            {
-                return (4 * EditorGUIUtility.singleLineHeight) + (3 * EditorGUIUtility.standardVerticalSpacing);
-            }
-
-            /// <inheritdoc/>
-            public void OnGUI(Rect rect)
-            {
-                rect.height = EditorGUIUtility.singleLineHeight;
-                m_Multiplier = EditorGUI.Slider(rect, Contents.Multiplier, m_Multiplier, 0f, 200f);
-
-                GUIUtils.NextLine(ref rect);
-                m_Offset = EditorGUI.Slider(rect, Contents.Offset, m_Offset, -200f, 200f);
-
-                GUIUtils.NextLine(ref rect);
-                m_Max = EditorGUI.Slider(rect, Contents.Max, m_Max, 0f, 200f);
-
-                GUIUtils.NextLine(ref rect);
-                m_Clamping = (Clamping)EditorGUI.EnumPopup(rect, Contents.Clamping, m_Clamping);
-            }
-
-#endif
         }
 
         [SerializeField]
