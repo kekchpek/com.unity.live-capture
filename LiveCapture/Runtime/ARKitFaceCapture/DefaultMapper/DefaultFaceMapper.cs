@@ -31,8 +31,10 @@ namespace Unity.LiveCapture.ARKitFaceCapture.DefaultMapper
             BlendShapes,
         }
 
-#if UNITY_EDITOR
-#pragma warning disable CS0414
+
+
+        // This fields are used in the only in the editor
+#pragma warning disable IDE0051
         [SerializeField]
         [Tooltip("Select the prefab containing the face rig to initialize the mapping with.")]
         GameObject m_RigPrefab = null;
@@ -49,8 +51,7 @@ namespace Unity.LiveCapture.ARKitFaceCapture.DefaultMapper
         [SerializeField]
         [Tooltip("Change the blend shape editor to show the bindings from blend shapes on the meshes to the ARKit blend shape locations.")]
         bool m_InvertMappings = false;
-#pragma warning restore CS0414
-#endif
+#pragma warning restore IDE0051
 
         [SerializeField]
         List<RendererMapping> m_Maps = new List<RendererMapping>();
