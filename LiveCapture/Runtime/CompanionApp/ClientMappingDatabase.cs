@@ -1,11 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using UnityEngine;
-#if UNITY_EDITOR
-using UnityEditorInternal;
-#endif
 
 namespace Unity.LiveCapture.CompanionApp
 {
@@ -14,7 +10,6 @@ namespace Unity.LiveCapture.CompanionApp
     /// </summary>
     class ClientMappingDatabase : ScriptableObject
     {
-        const string k_AssetPath = "UserSettings/LiveCapture/ClientMappingDatabase.asset";
 
         static ClientMappingDatabase s_Instance;
         static readonly Dictionary<ICompanionAppClient, ICompanionAppDevice> s_ClientToDevice = new Dictionary<ICompanionAppClient, ICompanionAppDevice>();
@@ -203,11 +198,13 @@ namespace Unity.LiveCapture.CompanionApp
             return false;
         }
 
+        // events for Editor
+        internal static event Action BeforeCreateInstance;
+        internal static event Action<ClientMappingDatabase> TryToSave;
+
         static void CreateAndLoad()
         {
-#if UNITY_EDITOR
-            InternalEditorUtility.LoadSerializedFileAndForget(k_AssetPath);
-#endif
+            BeforeCreateInstance?.Invoke();
 
             if (s_Instance == null)
             {
@@ -217,14 +214,7 @@ namespace Unity.LiveCapture.CompanionApp
 
         static void Save()
         {
-#if UNITY_EDITOR
-            var directoryName = Path.GetDirectoryName(k_AssetPath);
-
-            if (!Directory.Exists(directoryName))
-                Directory.CreateDirectory(directoryName);
-
-            InternalEditorUtility.SaveToSerializedFileAndForget(new[] {s_Instance}, k_AssetPath, true);
-#endif
+            TryToSave?.Invoke(s_Instance);
         }
 
         static string GetGameObjectPath(GameObject go)
