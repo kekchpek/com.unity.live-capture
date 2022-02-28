@@ -49,23 +49,20 @@ namespace Unity.LiveCapture.CompanionApp
         /// </summary>
         public TakeDescriptor[] Takes;
 
+        internal static event Action<SlateDescriptor, ISlate> Created;
+
         internal static SlateDescriptor Create(ISlate slate)
         {
             var descriptor = new SlateDescriptor();
-#if UNITY_EDITOR
             if (slate != null)
             {
-                var takes = AssetDatabaseUtility.GetAssetsAtPath<Take>(slate.Directory);
+                Created?.Invoke(descriptor, slate);
                 descriptor.SceneNumber = slate.SceneNumber;
                 descriptor.ShotName = slate.ShotName;
                 descriptor.TakeNumber = slate.TakeNumber;
                 descriptor.Description = slate.Description;
                 descriptor.Duration = slate.Duration;
-                descriptor.SelectedTake = takes.IndexOf(slate.Take);
-                descriptor.IterationBase = takes.IndexOf(slate.IterationBase);
-                descriptor.Takes = takes.Select(take => TakeDescriptor.Create(take)).ToArray();
             }
-#endif
             return descriptor;
         }
     }

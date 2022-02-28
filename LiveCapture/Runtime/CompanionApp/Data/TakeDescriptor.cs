@@ -34,6 +34,8 @@ namespace Unity.LiveCapture.CompanionApp
         [SerializeField]
         double m_TimelineDuration;
 
+        internal static event Action<TakeDescriptor, Take> Created;
+
         /// <summary>
         /// The globally unique identifier of the take asset.
         /// </summary>
@@ -165,8 +167,7 @@ namespace Unity.LiveCapture.CompanionApp
         internal static TakeDescriptor Create(Take take)
         {
             var descriptor = new TakeDescriptor();
-#if UNITY_EDITOR
-            descriptor.Guid = SerializableGuid.FromString(AssetDatabaseUtility.GetAssetGUID(take));
+
             descriptor.Name = take.name;
             descriptor.SceneNumber = take.SceneNumber;
             descriptor.ShotName = take.ShotName;
@@ -176,17 +177,13 @@ namespace Unity.LiveCapture.CompanionApp
             descriptor.Rating = take.Rating;
             descriptor.FrameRate = take.FrameRate;
 
-            if (take.Screenshot != null)
-            {
-                descriptor.Screenshot = SerializableGuid.FromString(AssetDatabaseUtility.GetAssetGUID(take.Screenshot));
-            }
 
             if (take.Timeline != null)
             {
                 descriptor.TimelineName = take.Timeline.name;
                 descriptor.TimelineDuration = take.Timeline.duration;
             }
-#endif
+            Created?.Invoke(descriptor, take);
             return descriptor;
         }
     }
