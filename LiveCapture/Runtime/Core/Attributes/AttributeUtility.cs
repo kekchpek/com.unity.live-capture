@@ -46,11 +46,7 @@ namespace Unity.LiveCapture
         /// <returns>A new array of tuples containing types using the attribute and the attribute instances.</returns>
         public static (Type type, T[] attributes)[] GetAllTypes<T>(bool inherit = false) where T : Attribute
         {
-#if UNITY_EDITOR
-            return TypeCache.GetTypesWithAttribute<T>()
-#else
             return GetAllTypes()
-#endif
                     .Select(type => (type, type.GetAttributes<T>(inherit)))
                     .Where(tuple => tuple.Item2.Length > 0)
                     .ToArray();
@@ -65,11 +61,7 @@ namespace Unity.LiveCapture
         /// <returns>A new array of tuples containing methods using the attribute and the attribute instances.</returns>
         public static (MethodInfo method, T[] attributes)[] GetAllMethods<T>(BindingFlags methodFlags, bool inherit = false) where T : Attribute
         {
-#if UNITY_EDITOR
-            return TypeCache.GetMethodsWithAttribute<T>()
-#else
             return GetAllTypes().SelectMany(type => type.GetMethods(methodFlags))
-#endif
                     .Select(method => (method, method.GetAttributes<T>(inherit)))
                     .Where(tuple => tuple.Item2.Length > 0)
                     .ToArray();
